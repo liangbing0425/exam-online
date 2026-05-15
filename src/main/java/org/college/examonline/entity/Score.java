@@ -29,6 +29,7 @@ public class Score implements Serializable {
     
     private BigDecimal subjectiveScore;
     
+    @TableField("`rank`")
     private Integer rank;
     
     private String status;

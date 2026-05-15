@@ -93,6 +93,11 @@
             transition: all 0.3s ease;
         }
         
+        select.input-field option {
+            color: #000000;
+            background: #ffffff;
+        }
+        
         .input-field:focus {
             border-color: #00d4aa;
             box-shadow: 0 0 20px rgba(0, 212, 170, 0.2);
@@ -567,7 +572,7 @@
                 { id: 'papers', icon: 'fa-file-alt', label: '试卷管理' },
                 { id: 'exams', icon: 'fa-clipboard-list', label: '考试管理' },
                 { id: 'scores', icon: 'fa-chart-bar', label: '成绩管理' },
-                { id: 'grading', icon: 'fa-check-double', label: '阅卷中心' },
+                // { id: 'grading', icon: 'fa-check-double', label: '阅卷中心' },
                 { id: 'analysis', icon: 'fa-chart-line', label: '数据分析' },
                 { id: 'settings', icon: 'fa-cog', label: '系统设置' },
                 { id: 'camera', icon: 'fa-camera', label: '摄像头测试' },
@@ -578,7 +583,7 @@
                 { id: 'papers', icon: 'fa-file-alt', label: '试卷管理' },
                 { id: 'exams', icon: 'fa-clipboard-list', label: '考试管理' },
                 { id: 'scores', icon: 'fa-chart-bar', label: '成绩管理' },
-                { id: 'grading', icon: 'fa-check-double', label: '阅卷中心' },
+                // { id: 'grading', icon: 'fa-check-double', label: '阅卷中心' },
                 { id: 'analysis', icon: 'fa-chart-line', label: '数据分析' },
             ],
             student: [
@@ -1734,23 +1739,28 @@
             
             const options = [];
             if (type === 'single' || type === 'multiple') {
-                if (form.optionA) options.push(form.optionA.value);
-                if (form.optionB) options.push(form.optionB.value);
-                if (form.optionC) options.push(form.optionC.value);
-                if (form.optionD) options.push(form.optionD.value);
+                if (form.optionA && form.optionA.value) options.push(form.optionA.value);
+                if (form.optionB && form.optionB.value) options.push(form.optionB.value);
+                if (form.optionC && form.optionC.value) options.push(form.optionC.value);
+                if (form.optionD && form.optionD.value) options.push(form.optionD.value);
             }
             
             const tagsStr = form.tags ? form.tags.value : '';
+            const tagsArray = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+            
             const questionData = {
                 type: type,
                 content: form.content.value,
-                options: options,
+                options: JSON.stringify(options), // 转换为JSON字符串
                 answer: answer,
                 difficulty: form.difficulty.value,
                 subject: form.subject.value,
                 chapter: form.chapter.value,
-                tags: tagsStr.split(',').map(t => t.trim()).filter(t => t),
-                score: parseInt(form.score.value) || 2
+                tags: JSON.stringify(tagsArray), // 转换为JSON数组字符串
+                score: parseFloat(form.score.value) || 2,
+                status: 'active',
+                creatorId: state.currentUser.id,
+                creatorName: state.currentUser.name
             };
             
             try {
@@ -1764,6 +1774,7 @@
                 }
             } catch (error) {
                 console.error('添加试题失败:', error);
+                showNotification('添加试题失败，请重试', 'error');
             }
         }
         
@@ -1777,12 +1788,263 @@
                         return;
                     }
                     
-                    // 显示编辑表单（简化版，实际应根据题型动态生成）
-                    showNotification('编辑功能：获取到试题ID ' + id + '，内容：' + question.content);
-                    // TODO: 实现完整的编辑表单
+                    // 解析选项（后端存储为JSON字符串）
+                    let options = [];
+                    try {
+                        if (question.options) {
+                            options = typeof question.options === 'string' ? JSON.parse(question.options) : question.options;
+                        }
+                    } catch (e) {
+                        console.error('解析选项失败:', e);
+                    }
+                    
+                    // 解析标签（后端存储为逗号分隔的字符串）
+                    let tags = [];
+                    if (question.tags) {
+                        tags = typeof question.tags === 'string' ? question.tags.split(',').map(t => t.trim()).filter(t => t) : question.tags;
+                    }
+                    
+                    const modalContent = `
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-xl font-bold">编辑试题</h3>
+                            <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <form onsubmit="updateQuestion(event, ${id})" class="space-y-4">
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">题型</label>
+                                    <select name="type" id="editQuestionType" class="input-field w-full px-4 py-2 rounded-xl" required onchange="updateEditQuestionForm('${question.type}')">
+                                        <option value="single" ${question.type === 'single' ? 'selected' : ''}>单选题</option>
+                                        <option value="multiple" ${question.type === 'multiple' ? 'selected' : ''}>多选题</option>
+                                        <option value="judge" ${question.type === 'judge' ? 'selected' : ''}>判断题</option>
+                                        <option value="fill" ${question.type === 'fill' ? 'selected' : ''}>填空题</option>
+                                        <option value="essay" ${question.type === 'essay' ? 'selected' : ''}>简答题</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">难度</label>
+                                    <select name="difficulty" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                        <option value="easy" ${question.difficulty === 'easy' ? 'selected' : ''}>简单</option>
+                                        <option value="medium" ${question.difficulty === 'medium' ? 'selected' : ''}>中等</option>
+                                        <option value="hard" ${question.difficulty === 'hard' ? 'selected' : ''}>困难</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">分值</label>
+                                    <input type="number" name="score" value="${question.score || 2}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">科目</label>
+                                    <select name="subject" id="editQuestionSubject" class="input-field w-full px-4 py-2 rounded-xl" required onchange="updateEditChapters()">
+                                        ${mockData.subjects.map(s => `<option value="${s}" ${question.subject === s ? 'selected' : ''}>${s}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">章节</label>
+                                    <select name="chapter" id="editQuestionChapter" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                        ${(mockData.chapters[question.subject] || ['通用']).map(c => `<option value="${c}" ${question.chapter === c ? 'selected' : ''}>${c}</option>`).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">题目内容</label>
+                                <textarea name="content" rows="3" class="input-field w-full px-4 py-2 rounded-xl" required placeholder="请输入题目内容...">${question.content}</textarea>
+                            </div>
+                            <div id="editOptionsContainer" ${question.type === 'judge' || question.type === 'fill' || question.type === 'essay' ? 'class="hidden"' : ''}>
+                                <label class="block text-sm text-gray-300 mb-2">选项</label>
+                                <div class="space-y-2" id="editOptionsList">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">A</span>
+                                        <input type="text" name="optionA" value="${options[0] || ''}" class="input-field flex-1 px-4 py-2 rounded-xl" placeholder="选项A">
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">B</span>
+                                        <input type="text" name="optionB" value="${options[1] || ''}" class="input-field flex-1 px-4 py-2 rounded-xl" placeholder="选项B">
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">C</span>
+                                        <input type="text" name="optionC" value="${options[2] || ''}" class="input-field flex-1 px-4 py-2 rounded-xl" placeholder="选项C">
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">D</span>
+                                        <input type="text" name="optionD" value="${options[3] || ''}" class="input-field flex-1 px-4 py-2 rounded-xl" placeholder="选项D">
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="editAnswerContainer">
+                                ${renderEditAnswerField(question)}
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">标签（用逗号分隔）</label>
+                                <input type="text" name="tags" value="${tags.join(', ')}" class="input-field w-full px-4 py-2 rounded-xl" placeholder="如：Java, 基础, 面向对象">
+                            </div>
+                            <div class="flex justify-end gap-3 pt-4">
+                                <button type="button" onclick="closeGenericModal()" class="px-6 py-2 rounded-xl glass-light hover:bg-white/10">取消</button>
+                                <button type="submit" class="btn-primary px-6 py-2 rounded-xl">更新</button>
+                            </div>
+                        </form>
+                    `;
+                    
+                    document.getElementById('modalContent').innerHTML = modalContent;
+                    document.getElementById('genericModal').classList.remove('hidden');
                 }
             } catch (error) {
                 console.error('获取试题信息失败:', error);
+                showNotification('获取试题信息失败', 'error');
+            }
+        }
+        
+        function renderEditAnswerField(question) {
+            if (question.type === 'judge') {
+                return `
+                    <label class="block text-sm text-gray-300 mb-2">正确答案</label>
+                    <div class="flex gap-4">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="answer" value="A" class="hidden peer" ${question.answer === 'A' ? 'checked' : ''}>
+                            <div class="px-6 py-2 rounded-lg glass-light peer-checked:bg-green-500 peer-checked:text-white">正确</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="answer" value="B" class="hidden peer" ${question.answer === 'B' ? 'checked' : ''}>
+                            <div class="px-6 py-2 rounded-lg glass-light peer-checked:bg-red-500 peer-checked:text-white">错误</div>
+                        </label>
+                    </div>
+                `;
+            } else if (question.type === 'fill' || question.type === 'essay') {
+                return `
+                    <label class="block text-sm text-gray-300 mb-2">参考答案</label>
+                    <textarea name="answer" rows="3" class="input-field w-full px-4 py-2 rounded-xl" placeholder="请输入参考答案...">${question.answer || ''}</textarea>
+                `;
+            } else {
+                const isMultiple = question.type === 'multiple';
+                const answerChars = question.answer ? question.answer.split('') : [];
+                return `
+                    <label class="block text-sm text-gray-300 mb-2">正确答案</label>
+                    <div class="flex gap-2">
+                        ${['A', 'B', 'C', 'D'].map(char => `
+                            <label class="cursor-pointer">
+                                <input type="${isMultiple ? 'checkbox' : 'radio'}" name="answer" value="${char}" class="hidden peer" ${answerChars.includes(char) ? 'checked' : ''}>
+                                <div class="w-10 h-10 rounded-lg glass-light flex items-center justify-center peer-checked:bg-primary peer-checked:text-white">${char}</div>
+                            </label>
+                        `).join('')}
+                    </div>
+                `;
+            }
+        }
+        
+        function updateEditChapters() {
+            const subject = document.getElementById('editQuestionSubject').value;
+            const chapters = mockData.chapters[subject] || ['通用'];
+            const chapterSelect = document.getElementById('editQuestionChapter');
+            chapterSelect.innerHTML = chapters.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+        
+        function updateEditQuestionForm(type) {
+            const optionsContainer = document.getElementById('editOptionsContainer');
+            const answerContainer = document.getElementById('editAnswerContainer');
+            
+            if (type === 'judge') {
+                optionsContainer.classList.add('hidden');
+                answerContainer.innerHTML = `
+                    <label class="block text-sm text-gray-300 mb-2">正确答案</label>
+                    <div class="flex gap-4">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="answer" value="A" class="hidden peer" checked>
+                            <div class="px-6 py-2 rounded-lg glass-light peer-checked:bg-green-500 peer-checked:text-white">正确</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="answer" value="B" class="hidden peer">
+                            <div class="px-6 py-2 rounded-lg glass-light peer-checked:bg-red-500 peer-checked:text-white">错误</div>
+                        </label>
+                    </div>
+                `;
+            } else if (type === 'fill' || type === 'essay') {
+                optionsContainer.classList.add('hidden');
+                answerContainer.innerHTML = `
+                    <label class="block text-sm text-gray-300 mb-2">参考答案</label>
+                    <textarea name="answer" rows="3" class="input-field w-full px-4 py-2 rounded-xl" placeholder="请输入参考答案..."></textarea>
+                `;
+            } else {
+                optionsContainer.classList.remove('hidden');
+                const isMultiple = type === 'multiple';
+                answerContainer.innerHTML = `
+                    <label class="block text-sm text-gray-300 mb-2">正确答案</label>
+                    <div class="flex gap-2">
+                        <label class="cursor-pointer">
+                            <input type="${isMultiple ? 'checkbox' : 'radio'}" name="answer" value="A" class="hidden peer" ${!isMultiple ? 'checked' : ''}>
+                            <div class="w-10 h-10 rounded-lg glass-light flex items-center justify-center peer-checked:bg-primary peer-checked:text-white">A</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="${isMultiple ? 'checkbox' : 'radio'}" name="answer" value="B" class="hidden peer">
+                            <div class="w-10 h-10 rounded-lg glass-light flex items-center justify-center peer-checked:bg-primary peer-checked:text-white">B</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="${isMultiple ? 'checkbox' : 'radio'}" name="answer" value="C" class="hidden peer">
+                            <div class="w-10 h-10 rounded-lg glass-light flex items-center justify-center peer-checked:bg-primary peer-checked:text-white">C</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="${isMultiple ? 'checkbox' : 'radio'}" name="answer" value="D" class="hidden peer">
+                            <div class="w-10 h-10 rounded-lg glass-light flex items-center justify-center peer-checked:bg-primary peer-checked:text-white">D</div>
+                        </label>
+                    </div>
+                `;
+            }
+        }
+        
+        async function updateQuestion(e, id) {
+            e.preventDefault();
+            const form = e.target;
+            const type = form.type.value;
+            
+            let answer = '';
+            if (type === 'multiple') {
+                const checked = form.querySelectorAll('input[name="answer"]:checked');
+                answer = Array.from(checked).map(c => c.value).join('');
+            } else if (type === 'fill' || type === 'essay') {
+                answer = form.answer ? form.answer.value : '';
+            } else {
+                answer = form.answer ? form.answer.value : '';
+            }
+            
+            const options = [];
+            if (type === 'single' || type === 'multiple') {
+                if (form.optionA && form.optionA.value) options.push(form.optionA.value);
+                if (form.optionB && form.optionB.value) options.push(form.optionB.value);
+                if (form.optionC && form.optionC.value) options.push(form.optionC.value);
+                if (form.optionD && form.optionD.value) options.push(form.optionD.value);
+            }
+            
+            const tagsStr = form.tags ? form.tags.value : '';
+            const tagsArray = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+            
+            const questionData = {
+                id: id,
+                type: type,
+                content: form.content.value,
+                options: JSON.stringify(options), // 转换为JSON字符串
+                answer: answer,
+                difficulty: form.difficulty.value,
+                subject: form.subject.value,
+                chapter: form.chapter.value,
+                tags: JSON.stringify(tagsArray), // 转换为JSON数组字符串
+                score: parseFloat(form.score.value) || 2
+            };
+            
+            try {
+                const result = await ApiService.question.update(questionData);
+                if (result.code === 200) {
+                    closeGenericModal();
+                    await renderQuestions();
+                    showNotification('试题更新成功！');
+                } else {
+                    showNotification(result.message || '更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('更新试题失败:', error);
+                showNotification('更新试题失败，请重试', 'error');
             }
         }
         
@@ -1850,6 +2112,9 @@
                     const papers = page.records || [];
                     const total = page.total || 0;
                     
+                    // 使用mockData中的科目列表
+                    const subjects = mockData.subjects;
+                    
                     const content = `
                         <div class="page-enter">
                             <div class="glass-card rounded-2xl p-6 mb-6">
@@ -1861,7 +2126,7 @@
                                         </div>
                                         <select id="subjectFilter" class="input-field px-4 py-2 rounded-xl" onchange="filterPapers()">
                                             <option value="">全部科目</option>
-                                            ${mockData.subjects.map(s => `<option value="${s}" ${paperPageData.subject === s ? 'selected' : ''}>${s}</option>`).join('')}
+                                            ${subjects.map(s => `<option value="${s}" ${paperPageData.subject === s ? 'selected' : ''}>${s}</option>`).join('')}
                                         </select>
                                         <select id="statusFilter" class="input-field px-4 py-2 rounded-xl" onchange="filterPapers()">
                                             <option value="">全部状态</option>
@@ -1888,7 +2153,7 @@
                                 <p class="text-gray-400">共 ${total} 条记录</p>
                                 <div class="flex items-center gap-2">
                                     <button onclick="changePaperPage(${paperPageData.pageNum - 1})" class="glass-light px-4 py-2 rounded-lg hover:bg-white/10" ${paperPageData.pageNum <= 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>
-                                    <span class="px-4 py-2">第 ${paperPageData.pageNum} / ${Math.ceil(total / paperPageData.pageSize)} 页</span>
+                                    <span class="px-4 py-2">第 ${paperPageData.pageNum} / ${Math.ceil(total / paperPageData.pageSize) || 1} 页</span>
                                     <button onclick="changePaperPage(${paperPageData.pageNum + 1})" class="glass-light px-4 py-2 rounded-lg hover:bg-white/10" ${paperPageData.pageNum >= Math.ceil(total / paperPageData.pageSize) ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>
                                 </div>
                             </div>
@@ -2049,73 +2314,308 @@
             document.getElementById('genericModal').classList.remove('hidden');
         }
         
-        function generatePaper(e) {
+        async function generatePaper(e) {
             e.preventDefault();
-            closeGenericModal();
-            showNotification('试卷生成成功！');
-            renderPapers();
+            const form = e.target;
+            
+            // 构建组卷配置
+            const config = {
+                name: form.name.value,
+                subject: form.subject.value,
+                duration: parseInt(form.duration.value) || 60,
+                easyCount: parseInt(form.easyCount.value) || 0,
+                mediumCount: parseInt(form.mediumCount.value) || 0,
+                hardCount: parseInt(form.hardCount.value) || 0,
+                singleCount: parseInt(form.singleCount.value) || 0,
+                multipleCount: parseInt(form.multipleCount.value) || 0,
+                judgeCount: parseInt(form.judgeCount.value) || 0,
+                essayCount: parseInt(form.essayCount.value) || 0,
+                creatorId: state.currentUser.id,
+                creatorName: state.currentUser.name
+            };
+            
+            try {
+                const result = await ApiService.paper.autoGenerate(config);
+                if (result.code === 200) {
+                    closeGenericModal();
+                    showNotification('试卷生成成功！');
+                    await renderPapers();
+                } else {
+                    showNotification(result.message || '生成失败', 'error');
+                }
+            } catch (error) {
+                console.error('自动组卷失败:', error);
+                showNotification('自动组卷失败，请重试', 'error');
+            }
         }
         
         function showCreatePaperModal() {
-            showNotification('手动组卷功能已触发');
-        }
-        
-        function previewPaper(id) {
-            const paper = mockData.papers.find(p => p.id === id);
-            if (!paper) return;
-            
             const modalContent = `
                 <div class="flex items-center justify-between mb-6">
-                    <h3 class="text-xl font-bold">${paper.name}</h3>
+                    <h3 class="text-xl font-bold">创建试卷</h3>
                     <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
-                <div class="space-y-4">
-                    <div class="glass-light rounded-xl p-4">
-                        <div class="flex items-center gap-4 text-sm">
-                            <span><i class="fas fa-book mr-2 text-primary"></i>${paper.subject}</span>
-                            <span><i class="fas fa-clock mr-2 text-secondary"></i>${paper.duration}分钟</span>
-                            <span><i class="fas fa-star mr-2 text-accent"></i>${paper.totalScore}分</span>
-                            <span><i class="fas fa-question-circle mr-2 text-purple-400"></i>${paper.questionCount}题</span>
+                <form onsubmit="createPaper(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-300 mb-2">试卷名称</label>
+                        <input type="text" name="name" class="input-field w-full px-4 py-2 rounded-xl" required placeholder="请输入试卷名称">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-2">科目</label>
+                            <select name="subject" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                ${mockData.subjects.map(s => `<option value="${s}">${s}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-2">考试时长（分钟）</label>
+                            <input type="number" name="duration" value="60" class="input-field w-full px-4 py-2 rounded-xl" required>
                         </div>
                     </div>
-                    <div class="max-h-96 overflow-y-auto space-y-4">
-                        ${mockData.questions.slice(0, 5).map((q, i) => `
-                            <div class="glass-light rounded-xl p-4">
-                                <p class="font-medium mb-2">${i + 1}. ${q.content}</p>
-                                ${q.type === 'single' || q.type === 'multiple' ? `
-                                    <div class="grid grid-cols-2 gap-2">
-                                        ${q.options.map((opt, j) => `
-                                            <div class="text-sm text-gray-400">${String.fromCharCode(65 + j)}. ${opt}</div>
-                                        `).join('')}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `).join('')}
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-2">总分</label>
+                            <input type="number" name="totalScore" value="100" class="input-field w-full px-4 py-2 rounded-xl" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-2">及格分</label>
+                            <input type="number" name="passScore" value="60" class="input-field w-full px-4 py-2 rounded-xl" required>
+                        </div>
                     </div>
-                </div>
+                    <div>
+                        <label class="block text-sm text-gray-300 mb-2">难度</label>
+                        <select name="difficulty" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            <option value="easy">简单</option>
+                            <option value="medium" selected>中等</option>
+                            <option value="hard">困难</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-300 mb-2">试卷描述</label>
+                        <textarea name="description" rows="3" class="input-field w-full px-4 py-2 rounded-xl" placeholder="请输入试卷描述..."></textarea>
+                    </div>
+                    <div class="flex justify-end gap-3 pt-4">
+                        <button type="button" onclick="closeGenericModal()" class="px-6 py-2 rounded-xl glass-light hover:bg-white/10">取消</button>
+                        <button type="submit" class="btn-primary px-6 py-2 rounded-xl">创建</button>
+                    </div>
+                </form>
             `;
             
             document.getElementById('modalContent').innerHTML = modalContent;
             document.getElementById('genericModal').classList.remove('hidden');
         }
         
-        function editPaper(id) {
-            showNotification('编辑试卷功能已触发，试卷ID: ' + id);
+        async function createPaper(e) {
+            e.preventDefault();
+            const form = e.target;
+            
+            const paperData = {
+                name: form.name.value,
+                subject: form.subject.value,
+                duration: parseInt(form.duration.value) || 60,
+                totalScore: parseFloat(form.totalScore.value) || 100,
+                passScore: parseFloat(form.passScore.value) || 60,
+                difficulty: form.difficulty.value,
+                description: form.description.value,
+                questionCount: 0,
+                status: 'draft',
+                creatorId: state.currentUser.id,
+                creatorName: state.currentUser.name
+            };
+            
+            try {
+                const result = await ApiService.paper.add(paperData);
+                if (result.code === 200) {
+                    closeGenericModal();
+                    showNotification('试卷创建成功！');
+                    await renderPapers();
+                } else {
+                    showNotification(result.message || '创建失败', 'error');
+                }
+            } catch (error) {
+                console.error('创建试卷失败:', error);
+                showNotification('创建试卷失败，请重试', 'error');
+            }
+        }
+        
+        async function previewPaper(id) {
+            try {
+                const result = await ApiService.paper.getById(id);
+                if (result.code === 200) {
+                    const paper = result.data;
+                    if (!paper) {
+                        showNotification('试卷不存在', 'error');
+                        return;
+                    }
+                    
+                    const modalContent = `
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-xl font-bold">${paper.name}</h3>
+                            <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="glass-light rounded-xl p-4">
+                                <div class="flex items-center gap-4 text-sm">
+                                    <span><i class="fas fa-book mr-2 text-primary"></i>${paper.subject}</span>
+                                    <span><i class="fas fa-clock mr-2 text-secondary"></i>${paper.duration}分钟</span>
+                                    <span><i class="fas fa-star mr-2 text-accent"></i>${paper.totalScore}分</span>
+                                    <span><i class="fas fa-question-circle mr-2 text-purple-400"></i>${paper.questionCount || 0}题</span>
+                                </div>
+                            </div>
+                            ${paper.description ? `
+                                <div class="glass-light rounded-xl p-4">
+                                    <p class="text-sm text-gray-400 mb-2">试卷描述：</p>
+                                    <p>${paper.description}</p>
+                                </div>
+                            ` : ''}
+                            <div class="glass-light rounded-xl p-4">
+                                <p class="text-sm text-gray-400 mb-2">状态：<span class="tag ${getStatusColor(paper.status)}">${getStatusText(paper.status)}</span></p>
+                                <p class="text-sm text-gray-400">创建时间：${paper.createTime ? paper.createTime.replace('T', ' ').substring(0, 19) : '-'}</p>
+                                <p class="text-sm text-gray-400">创建者：${paper.creatorName || '-'}</p>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('modalContent').innerHTML = modalContent;
+                    document.getElementById('genericModal').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('获取试卷详情失败:', error);
+                showNotification('获取试卷详情失败', 'error');
+            }
+        }
+        
+        async function editPaper(id) {
+            try {
+                const result = await ApiService.paper.getById(id);
+                if (result.code === 200) {
+                    const paper = result.data;
+                    if (!paper) {
+                        showNotification('试卷不存在', 'error');
+                        return;
+                    }
+                    
+                    const modalContent = `
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-xl font-bold">编辑试卷</h3>
+                            <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <form onsubmit="updatePaper(event, ${id})" class="space-y-4">
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">试卷名称</label>
+                                <input type="text" name="name" value="${paper.name}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">科目</label>
+                                    <select name="subject" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                        ${mockData.subjects.map(s => `<option value="${s}" ${paper.subject === s ? 'selected' : ''}>${s}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">考试时长（分钟）</label>
+                                    <input type="number" name="duration" value="${paper.duration || 60}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">总分</label>
+                                    <input type="number" name="totalScore" value="${paper.totalScore || 100}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">及格分</label>
+                                    <input type="number" name="passScore" value="${paper.passScore || 60}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">难度</label>
+                                <select name="difficulty" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                    <option value="easy" ${paper.difficulty === 'easy' ? 'selected' : ''}>简单</option>
+                                    <option value="medium" ${paper.difficulty === 'medium' ? 'selected' : ''}>中等</option>
+                                    <option value="hard" ${paper.difficulty === 'hard' ? 'selected' : ''}>困难</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">状态</label>
+                                <select name="status" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                    <option value="draft" ${paper.status === 'draft' ? 'selected' : ''}>草稿</option>
+                                    <option value="published" ${paper.status === 'published' ? 'selected' : ''}>已发布</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">试卷描述</label>
+                                <textarea name="description" rows="3" class="input-field w-full px-4 py-2 rounded-xl" placeholder="请输入试卷描述...">${paper.description || ''}</textarea>
+                            </div>
+                            <div class="flex justify-end gap-3 pt-4">
+                                <button type="button" onclick="closeGenericModal()" class="px-6 py-2 rounded-xl glass-light hover:bg-white/10">取消</button>
+                                <button type="submit" class="btn-primary px-6 py-2 rounded-xl">更新</button>
+                            </div>
+                        </form>
+                    `;
+                    
+                    document.getElementById('modalContent').innerHTML = modalContent;
+                    document.getElementById('genericModal').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('获取试卷信息失败:', error);
+                showNotification('获取试卷信息失败', 'error');
+            }
+        }
+        
+        async function updatePaper(e, id) {
+            e.preventDefault();
+            const form = e.target;
+            
+            const paperData = {
+                id: id,
+                name: form.name.value,
+                subject: form.subject.value,
+                duration: parseInt(form.duration.value) || 60,
+                totalScore: parseFloat(form.totalScore.value) || 100,
+                passScore: parseFloat(form.passScore.value) || 60,
+                difficulty: form.difficulty.value,
+                status: form.status.value,
+                description: form.description.value
+            };
+            
+            try {
+                const result = await ApiService.paper.update(paperData);
+                if (result.code === 200) {
+                    closeGenericModal();
+                    showNotification('试卷更新成功！');
+                    await renderPapers();
+                } else {
+                    showNotification(result.message || '更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('更新试卷失败:', error);
+                showNotification('更新试卷失败，请重试', 'error');
+            }
         }
         
         
         
         
         
-        function deletePaper(id) {
+        async function deletePaper(id) {
             if (confirm('确定要删除该试卷吗？')) {
-                const index = mockData.papers.findIndex(p => p.id === id);
-                if (index > -1) {
-                    mockData.papers.splice(index, 1);
-                    renderPapers();
-                    showNotification('试卷已删除！');
+                try {
+                    const result = await ApiService.paper.delete(id);
+                    if (result.code === 200) {
+                        await renderPapers();
+                        showNotification('试卷已删除！');
+                    } else {
+                        showNotification(result.message || '删除失败', 'error');
+                    }
+                } catch (error) {
+                    console.error('删除试卷失败:', error);
+                    showNotification('删除试卷失败，请重试', 'error');
                 }
             }
         }
@@ -2181,11 +2681,6 @@
                                                 <span class="text-sm text-gray-400">${exam.participantCount > 0 ? (exam.submittedCount / exam.participantCount * 100).toFixed(0) : 0}% 完成</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                ${exam.status === 'ongoing' && state.currentUser.role !== 'student' ? `
-                                                    <button onclick="monitorExam(${exam.id})" class="px-4 py-2 rounded-lg glass-light hover:bg-white/10 text-secondary">
-                                                        <i class="fas fa-desktop mr-1"></i>监控
-                                                    </button>
-                                                ` : ''}
                                                 ${exam.status === 'ended' ? `
                                                     <button onclick="viewExamResults(${exam.id})" class="px-4 py-2 rounded-lg glass-light hover:bg-white/10 text-primary">
                                                         <i class="fas fa-chart-bar mr-1"></i>成绩
@@ -2229,104 +2724,293 @@
             }
         }
         
-        function showCreateExamModal() {
-            const modalContent = `
-                <div class="flex items-center justify-between mb-6">
-                    <h3 class="text-xl font-bold">发布考试</h3>
-                    <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-                <form onsubmit="createExam(event)" class="space-y-4">
-                    <div>
-                        <label class="block text-sm text-gray-300 mb-2">选择试卷</label>
-                        <select name="paperId" class="input-field w-full px-4 py-2 rounded-xl" required>
-                            ${mockData.papers.filter(p => p.status === 'published').map(p => `
-                                <option value="${p.id}">${p.name} (${p.subject})</option>
-                            `).join('')}
-                        </select>
+        async function showCreateExamModal() {
+            try {
+                // 获取已发布的试卷列表
+                const result = await ApiService.paper.getPage({ pageNum: 1, pageSize: 100, status: 'published' });
+                
+                let papersHtml = '';
+                if (result.code === 200) {
+                    const papers = result.data.records || [];
+                    papersHtml = papers.map(p => `
+                        <option value="${p.id}">${p.name} (${p.subject})</option>
+                    `).join('');
+                }
+                
+                if (!papersHtml) {
+                    papersHtml = '<option value="">暂无可用试卷，请先创建并发布试卷</option>';
+                }
+                
+                const modalContent = `
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-xl font-bold">发布考试</h3>
+                        <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
+                    <form onsubmit="createExam(event)" class="space-y-4">
                         <div>
-                            <label class="block text-sm text-gray-300 mb-2">开始时间</label>
-                            <input type="datetime-local" name="startTime" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            <label class="block text-sm text-gray-300 mb-2">选择试卷</label>
+                            <select name="paperId" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                ${papersHtml}
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">开始时间</label>
+                                <input type="datetime-local" name="startTime" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">结束时间</label>
+                                <input type="datetime-local" name="endTime" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            </div>
                         </div>
                         <div>
-                            <label class="block text-sm text-gray-300 mb-2">结束时间</label>
-                            <input type="datetime-local" name="endTime" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            <label class="block text-sm text-gray-300 mb-2">考试说明</label>
+                            <textarea name="description" rows="3" class="input-field w-full px-4 py-2 rounded-xl" placeholder="请输入考试说明..."></textarea>
                         </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-300 mb-2">参与班级</label>
-                        <div class="grid grid-cols-3 gap-2">
-                            <label class="cursor-pointer">
-                                <input type="checkbox" name="classes" value="计算机2201" class="hidden peer" checked>
-                                <div class="glass-light rounded-lg py-2 text-center text-sm peer-checked:bg-primary/20 peer-checked:border-primary">计算机2201</div>
-                            </label>
-                            <label class="cursor-pointer">
-                                <input type="checkbox" name="classes" value="计算机2202" class="hidden peer">
-                                <div class="glass-light rounded-lg py-2 text-center text-sm peer-checked:bg-primary/20 peer-checked:border-primary">计算机2202</div>
-                            </label>
-                            <label class="cursor-pointer">
-                                <input type="checkbox" name="classes" value="计算机2203" class="hidden peer">
-                                <div class="glass-light rounded-lg py-2 text-center text-sm peer-checked:bg-primary/20 peer-checked:border-primary">计算机2203</div>
-                            </label>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-2">考试设置</label>
+                            <div class="space-y-2">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="antiCheat" checked class="w-4 h-4 rounded">
+                                    <span class="text-sm">开启防作弊检测（切屏提醒）</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="randomOrder" class="w-4 h-4 rounded">
+                                    <span class="text-sm">打乱题目顺序</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="allowReview" checked class="w-4 h-4 rounded">
+                                    <span class="text-sm">考后允许查看答卷</span>
+                                </label>
+                            </div>
                         </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-300 mb-2">考试设置</label>
-                        <div class="space-y-2">
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="antiCheat" checked class="w-4 h-4 rounded">
-                                <span class="text-sm">开启防作弊检测（切屏提醒）</span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="camera" checked class="w-4 h-4 rounded">
-                                <span class="text-sm">开启摄像头监控</span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="shuffle" class="w-4 h-4 rounded">
-                                <span class="text-sm">打乱题目顺序</span>
-                            </label>
+                        <div class="flex justify-end gap-3 pt-4">
+                            <button type="button" onclick="closeGenericModal()" class="px-6 py-2 rounded-xl glass-light hover:bg-white/10">取消</button>
+                            <button type="submit" class="btn-primary px-6 py-2 rounded-xl">发布</button>
                         </div>
-                    </div>
-                    <div class="flex justify-end gap-3 pt-4">
-                        <button type="button" onclick="closeGenericModal()" class="px-6 py-2 rounded-xl glass-light hover:bg-white/10">取消</button>
-                        <button type="submit" class="btn-primary px-6 py-2 rounded-xl">发布</button>
-                    </div>
-                </form>
-            `;
-            
-            document.getElementById('modalContent').innerHTML = modalContent;
-            document.getElementById('genericModal').classList.remove('hidden');
+                    </form>
+                `;
+                
+                document.getElementById('modalContent').innerHTML = modalContent;
+                document.getElementById('genericModal').classList.remove('hidden');
+            } catch (error) {
+                console.error('加载试卷列表失败:', error);
+                showNotification('加载试卷列表失败', 'error');
+            }
         }
         
-        function createExam(e) {
+        async function createExam(e) {
             e.preventDefault();
-            closeGenericModal();
-            showNotification('考试发布成功！');
-            renderExams();
-        }
-        
-        function monitorExam(id) {
-            showNotification('考试监控功能已触发，考试ID: ' + id);
+            const form = e.target;
+            
+            // 获取选择的试卷信息
+            const paperId = form.paperId.value;
+            if (!paperId) {
+                showNotification('请选择试卷', 'error');
+                return;
+            }
+            
+            const paperSelect = form.paperId;
+            const paperName = paperSelect.options[paperSelect.selectedIndex].text;
+            
+            // 提取科目信息
+            const subjectMatch = paperName.match(/\(([^)]+)\)$/);
+            const subject = subjectMatch ? subjectMatch[1] : '';
+            
+            // 验证时间
+            const startTimeValue = form.startTime.value;
+            const endTimeValue = form.endTime.value;
+            
+            if (!startTimeValue || !endTimeValue) {
+                showNotification('请设置开始和结束时间', 'error');
+                return;
+            }
+            
+            // 格式化时间为后端需要的格式
+            const startTime = startTimeValue.replace('T', ' ') + ':00';
+            const endTime = endTimeValue.replace('T', ' ') + ':00';
+            
+            const examData = {
+                paperId: parseInt(paperId),
+                paperName: paperName.replace(/\s*\([^)]+\)$/, ''),
+                subject: subject,
+                startTime: startTime,
+                endTime: endTime,
+                duration: 60, // 默认60分钟，实际应该从试卷中获取
+                status: 'upcoming',
+                participantCount: 0,
+                submittedCount: 0,
+                allowReview: form.allowReview.checked ? 1 : 0,
+                randomOrder: form.randomOrder.checked ? 1 : 0,
+                antiCheat: form.antiCheat.checked ? 1 : 0,
+                maxSwitchTimes: 3,
+                description: form.description.value || '',
+                creatorId: state.currentUser.id,
+                creatorName: state.currentUser.name
+            };
+            
+            console.log('发布考试数据:', examData);
+            
+            try {
+                const result = await ApiService.exam.add(examData);
+                console.log('发布考试结果:', result);
+                
+                if (result.code === 200) {
+                    closeGenericModal();
+                    showNotification('考试发布成功！');
+                    await renderExams();
+                } else {
+                    console.error('发布考试失败，后端返回:', result);
+                    showNotification(result.message || '发布失败', 'error');
+                }
+            } catch (error) {
+                console.error('发布考试异常:', error);
+                console.error('错误详情:', error.response || error);
+                
+                // 尝试获取更详细的错误信息
+                let errorMsg = '发布考试失败';
+                if (error.response) {
+                    // HTTP 错误响应
+                    if (error.response.status === 400) {
+                        errorMsg = '请求参数错误，请检查表单填写';
+                        if (error.response.data && error.response.data.message) {
+                            errorMsg += ': ' + error.response.data.message;
+                        }
+                    } else if (error.response.status === 500) {
+                        errorMsg = '服务器内部错误';
+                    }
+                } else if (error.message) {
+                    errorMsg += ': ' + error.message;
+                }
+                
+                showNotification(errorMsg, 'error');
+            }
         }
         
         function viewExamResults(id) {
             navigateTo('scores');
         }
         
-        function editExam(id) {
-            showNotification('编辑考试功能已触发，考试ID: ' + id);
+        async function editExam(id) {
+            try {
+                const result = await ApiService.exam.getById(id);
+                if (result.code === 200) {
+                    const exam = result.data;
+                    if (!exam) {
+                        showNotification('考试不存在', 'error');
+                        return;
+                    }
+                    
+                    // 格式化时间为datetime-local格式
+                    const formatDateTimeLocal = (dateTime) => {
+                        if (!dateTime) return '';
+                        return dateTime.replace(' ', 'T').substring(0, 16);
+                    };
+                    
+                    const modalContent = `
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-xl font-bold">编辑考试</h3>
+                            <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <form onsubmit="updateExam(event, ${id})" class="space-y-4">
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">考试名称</label>
+                                <input type="text" name="paperName" value="${exam.paperName}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">开始时间</label>
+                                    <input type="datetime-local" name="startTime" value="${formatDateTimeLocal(exam.startTime)}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-2">结束时间</label>
+                                    <input type="datetime-local" name="endTime" value="${formatDateTimeLocal(exam.endTime)}" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">考试说明</label>
+                                <textarea name="description" rows="3" class="input-field w-full px-4 py-2 rounded-xl" placeholder="请输入考试说明...">${exam.description || ''}</textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">考试设置</label>
+                                <div class="space-y-2">
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" name="antiCheat" ${exam.antiCheat === 1 ? 'checked' : ''} class="w-4 h-4 rounded">
+                                        <span class="text-sm">开启防作弊检测</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" name="randomOrder" ${exam.randomOrder === 1 ? 'checked' : ''} class="w-4 h-4 rounded">
+                                        <span class="text-sm">打乱题目顺序</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" name="allowReview" ${exam.allowReview === 1 ? 'checked' : ''} class="w-4 h-4 rounded">
+                                        <span class="text-sm">考后允许查看答卷</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="flex justify-end gap-3 pt-4">
+                                <button type="button" onclick="closeGenericModal()" class="px-6 py-2 rounded-xl glass-light hover:bg-white/10">取消</button>
+                                <button type="submit" class="btn-primary px-6 py-2 rounded-xl">更新</button>
+                            </div>
+                        </form>
+                    `;
+                    
+                    document.getElementById('modalContent').innerHTML = modalContent;
+                    document.getElementById('genericModal').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('获取考试信息失败:', error);
+                showNotification('获取考试信息失败', 'error');
+            }
         }
         
-        function deleteExam(id) {
+        async function updateExam(e, id) {
+            e.preventDefault();
+            const form = e.target;
+            
+            const examData = {
+                id: id,
+                paperName: form.paperName.value,
+                startTime: form.startTime.value.replace('T', ' ') + ':00',
+                endTime: form.endTime.value.replace('T', ' ') + ':00',
+                description: form.description.value,
+                allowReview: form.allowReview.checked ? 1 : 0,
+                randomOrder: form.randomOrder.checked ? 1 : 0,
+                antiCheat: form.antiCheat.checked ? 1 : 0
+            };
+            
+            try {
+                const result = await ApiService.exam.update(examData);
+                if (result.code === 200) {
+                    closeGenericModal();
+                    showNotification('考试更新成功！');
+                    await renderExams();
+                } else {
+                    showNotification(result.message || '更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('更新考试失败:', error);
+                showNotification('更新考试失败，请重试', 'error');
+            }
+        }
+        
+        async function deleteExam(id) {
             if (confirm('确定要删除该考试吗？')) {
-                const index = mockData.exams.findIndex(e => e.id === id);
-                if (index > -1) {
-                    mockData.exams.splice(index, 1);
-                    renderExams();
-                    showNotification('考试已删除！');
+                try {
+                    const result = await ApiService.exam.delete(id);
+                    if (result.code === 200) {
+                        await renderExams();
+                        showNotification('考试已删除！');
+                    } else {
+                        showNotification(result.message || '删除失败', 'error');
+                    }
+                } catch (error) {
+                    console.error('删除考试失败:', error);
+                    showNotification('删除考试失败，请重试', 'error');
                 }
             }
         }
@@ -2627,19 +3311,43 @@
         }
         
         // 成绩管理
+        let scorePageData = { pageNum: 1, pageSize: 100, studentName: '', examId: '' };
+        
         async function renderScores() {
             try {
-                const result = await ApiService.score.getPage({ pageNum: 1, pageSize: 100 });
+                const params = {
+                    pageNum: scorePageData.pageNum,
+                    pageSize: scorePageData.pageSize
+                };
+                
+                const result = await ApiService.score.getPage(params);
                 
                 if (result.code === 200) {
-                    const scores = result.data.records || [];
+                    let scores = result.data.records || [];
                     const total = result.data.total || 0;
+                    
+                    // 前端过滤：按学生姓名搜索
+                    if (scorePageData.studentName) {
+                        scores = scores.filter(s => s.studentName && s.studentName.includes(scorePageData.studentName));
+                    }
+                    
+                    // 前端过滤：按考试ID过滤
+                    if (scorePageData.examId) {
+                        scores = scores.filter(s => s.examId == scorePageData.examId);
+                    }
                     
                     // 计算统计数据（使用totalScore字段）
                     const avgScore = scores.length > 0 ? (scores.reduce((sum, s) => sum + (parseFloat(s.totalScore) || 0), 0) / scores.length).toFixed(1) : 0;
                     const maxScore = scores.length > 0 ? Math.max(...scores.map(s => parseFloat(s.totalScore) || 0)) : 0;
                     const passCount = scores.filter(s => parseFloat(s.totalScore) >= 60).length;
                     const passRate = scores.length > 0 ? ((passCount / scores.length) * 100).toFixed(1) : 0;
+                    
+                    // 获取考试列表用于筛选
+                    const examResult = await ApiService.exam.getPage({ pageNum: 1, pageSize: 100 });
+                    let exams = [];
+                    if (examResult.code === 200) {
+                        exams = examResult.data.records || [];
+                    }
                     
                     const content = `
                         <div class="page-enter">
@@ -2648,10 +3356,11 @@
                                     <div class="flex items-center gap-4">
                                         <div class="relative">
                                             <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                                            <input type="text" placeholder="搜索学生..." class="input-field pl-12 pr-4 py-2 rounded-xl w-64">
+                                            <input type="text" id="studentNameSearch" placeholder="搜索学生姓名..." class="input-field pl-12 pr-4 py-2 rounded-xl w-64" value="${scorePageData.studentName}" onkeyup="debounceFilterScores()">
                                         </div>
-                                        <select class="input-field px-4 py-2 rounded-xl">
+                                        <select id="examFilter" class="input-field px-4 py-2 rounded-xl" onchange="filterScores()">
                                             <option value="">全部考试</option>
+                                            ${exams.map(exam => `<option value="${exam.id}" ${scorePageData.examId == exam.id ? 'selected' : ''}>${exam.paperName}</option>`).join('')}
                                         </select>
                                     </div>
                                     <div class="flex items-center gap-3">
@@ -2669,7 +3378,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                                 <div class="glass-card rounded-xl p-4">
                                     <p class="text-gray-400 text-sm">参考人数</p>
-                                    <p class="text-2xl font-bold text-primary mt-1">${total}</p>
+                                    <p class="text-2xl font-bold text-primary mt-1">${scores.length}</p>
                                 </div>
                                 <div class="glass-card rounded-xl p-4">
                                     <p class="text-gray-400 text-sm">平均分</p>
@@ -2729,7 +3438,7 @@
                                                             <button onclick="viewScoreDetail(${score.id})" class="p-2 rounded-lg hover:bg-white/10 text-primary" title="详情">
                                                                 <i class="fas fa-eye"></i>
                                                             </button>
-                                                            <button onclick="exportStudentScore(${score.id})" class="p-2 rounded-lg hover:bg-white/10 text-secondary" title="导出">
+                                                            <button onclick="exportStudentScore(${score.id}, '${score.studentName}', '${score.examName}')" class="p-2 rounded-lg hover:bg-white/10 text-secondary" title="导出">
                                                                 <i class="fas fa-download"></i>
                                                             </button>
                                                         </div>
@@ -2750,99 +3459,350 @@
             }
         }
         
-        function exportScores() {
-            showNotification('成绩导出成功！');
+        let scoreFilterTimeout = null;
+        function debounceFilterScores() {
+            clearTimeout(scoreFilterTimeout);
+            scoreFilterTimeout = setTimeout(() => filterScores(), 500);
         }
         
-        function showScoreAnalysis() {
-            const modalContent = `
-                <div class="flex items-center justify-between mb-6">
-                    <h3 class="text-xl font-bold">成绩分析报告</h3>
-                    <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-                <div class="space-y-6">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="glass-light rounded-xl p-4">
-                            <h4 class="font-medium mb-3">分数段分布</h4>
-                            <div class="space-y-2">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm w-16">90-100</span>
-                                    <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
-                                        <div class="h-full bg-green-500" style="width: 20%"></div>
+        function filterScores() {
+            const studentNameInput = document.getElementById('studentNameSearch');
+            const examFilterSelect = document.getElementById('examFilter');
+            
+            if (studentNameInput) {
+                scorePageData.studentName = studentNameInput.value;
+            }
+            if (examFilterSelect) {
+                scorePageData.examId = examFilterSelect.value;
+            }
+            
+            renderScores();
+        }
+        
+        async function exportScores() {
+            try {
+                const result = await ApiService.score.getPage({ pageNum: 1, pageSize: 1000 });
+                
+                if (result.code === 200) {
+                    const scores = result.data.records || [];
+                    
+                    // 生成CSV内容
+                    let csvContent = '\uFEFF'; // BOM for Excel
+                    csvContent += '学生姓名,学号,考试名称,客观题得分,主观题得分,总分,提交时间,状态\n';
+                    
+                    scores.forEach(score => {
+                        const row = [
+                            score.studentName || '-',
+                            score.studentNo || '-',
+                            score.examName || '-',
+                            parseFloat(score.objectiveScore || 0).toFixed(1),
+                            parseFloat(score.subjectiveScore || 0).toFixed(1),
+                            parseFloat(score.totalScore || 0).toFixed(1),
+                            score.submitTime ? score.submitTime.replace('T', ' ').substring(0, 19) : '-',
+                            getStatusText(score.status)
+                        ];
+                        csvContent += row.join(',') + '\n';
+                    });
+                    
+                    // 下载文件
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `成绩导出_${new Date().getTime()}.csv`);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    showNotification(`成功导出 ${scores.length} 条成绩记录！`);
+                }
+            } catch (error) {
+                console.error('导出成绩失败:', error);
+                showNotification('导出成绩失败', 'error');
+            }
+        }
+        
+        async function showScoreAnalysis() {
+            try {
+                // 获取所有成绩数据
+                const result = await ApiService.score.getPage({ pageNum: 1, pageSize: 1000 });
+                
+                if (result.code !== 200) {
+                    showNotification('获取成绩数据失败', 'error');
+                    return;
+                }
+                
+                const scores = result.data.records || [];
+                
+                if (scores.length === 0) {
+                    showNotification('暂无成绩数据', 'error');
+                    return;
+                }
+                
+                // 计算统计数据
+                const totalScores = scores.map(s => parseFloat(s.totalScore) || 0);
+                const avgScore = (totalScores.reduce((sum, score) => sum + score, 0) / totalScores.length).toFixed(1);
+                const maxScore = Math.max(...totalScores).toFixed(1);
+                const minScore = Math.min(...totalScores).toFixed(1);
+                
+                // 计算中位数
+                const sortedScores = [...totalScores].sort((a, b) => a - b);
+                const midIndex = Math.floor(sortedScores.length / 2);
+                const medianScore = sortedScores.length % 2 === 0 
+                    ? ((sortedScores[midIndex - 1] + sortedScores[midIndex]) / 2).toFixed(1)
+                    : sortedScores[midIndex].toFixed(1);
+                
+                // 计算标准差
+                const variance = totalScores.reduce((sum, score) => sum + Math.pow(score - avgScore, 2), 0) / totalScores.length;
+                const stdDev = Math.sqrt(variance).toFixed(1);
+                
+                // 计算分数段分布
+                const excellentCount = totalScores.filter(s => s >= 90).length; // 90-100
+                const goodCount = totalScores.filter(s => s >= 80 && s < 90).length; // 80-89
+                const mediumCount = totalScores.filter(s => s >= 70 && s < 80).length; // 70-79
+                const passCount = totalScores.filter(s => s >= 60 && s < 70).length; // 60-69
+                const failCount = totalScores.filter(s => s < 60).length; // 0-59
+                
+                const excellentRate = ((excellentCount / totalScores.length) * 100).toFixed(1);
+                const goodRate = ((goodCount / totalScores.length) * 100).toFixed(1);
+                const mediumRate = ((mediumCount / totalScores.length) * 100).toFixed(1);
+                const passRate = ((passCount / totalScores.length) * 100).toFixed(1);
+                const failRate = ((failCount / totalScores.length) * 100).toFixed(1);
+                
+                // 计算及格率和优秀率
+                const passTotalCount = totalScores.filter(s => s >= 60).length;
+                const passTotalRate = ((passTotalCount / totalScores.length) * 100).toFixed(1);
+                const excellentTotalRate = excellentRate;
+                
+                const modalContent = `
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-xl font-bold">成绩分析报告</h3>
+                        <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
+                    </div>
+                    <div class="space-y-6">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="glass-light rounded-xl p-4">
+                                <h4 class="font-medium mb-3">分数段分布</h4>
+                                <div class="space-y-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm w-16">90-100</span>
+                                        <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
+                                            <div class="h-full bg-green-500" style="width: ${excellentRate}%"></div>
+                                        </div>
+                                        <span class="text-sm w-8">${excellentRate}%</span>
                                     </div>
-                                    <span class="text-sm w-8">20%</span>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm w-16">80-89</span>
+                                        <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
+                                            <div class="h-full bg-primary" style="width: ${goodRate}%"></div>
+                                        </div>
+                                        <span class="text-sm w-8">${goodRate}%</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm w-16">70-79</span>
+                                        <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
+                                            <div class="h-full bg-secondary" style="width: ${mediumRate}%"></div>
+                                        </div>
+                                        <span class="text-sm w-8">${mediumRate}%</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm w-16">60-69</span>
+                                        <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
+                                            <div class="h-full bg-accent" style="width: ${passRate}%"></div>
+                                        </div>
+                                        <span class="text-sm w-8">${passRate}%</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm w-16">0-59</span>
+                                        <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
+                                            <div class="h-full bg-red-500" style="width: ${failRate}%"></div>
+                                        </div>
+                                        <span class="text-sm w-8">${failRate}%</span>
+                                    </div>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm w-16">80-89</span>
-                                    <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
-                                        <div class="h-full bg-primary" style="width: 35%"></div>
+                            </div>
+                            <div class="glass-light rounded-xl p-4">
+                                <h4 class="font-medium mb-3">统计数据</h4>
+                                <div class="space-y-3">
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">平均分</span>
+                                        <span class="font-medium">${avgScore}</span>
                                     </div>
-                                    <span class="text-sm w-8">35%</span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm w-16">70-79</span>
-                                    <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
-                                        <div class="h-full bg-secondary" style="width: 25%"></div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">中位数</span>
+                                        <span class="font-medium">${medianScore}</span>
                                     </div>
-                                    <span class="text-sm w-8">25%</span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm w-16">60-69</span>
-                                    <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
-                                        <div class="h-full bg-accent" style="width: 12%"></div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">最高分</span>
+                                        <span class="font-medium text-green-400">${maxScore}</span>
                                     </div>
-                                    <span class="text-sm w-8">12%</span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm w-16">0-59</span>
-                                    <div class="flex-1 h-4 bg-white/10 rounded-full overflow-hidden">
-                                        <div class="h-full bg-red-500" style="width: 8%"></div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">最低分</span>
+                                        <span class="font-medium text-red-400">${minScore}</span>
                                     </div>
-                                    <span class="text-sm w-8">8%</span>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">标准差</span>
+                                        <span class="font-medium">${stdDev}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">及格率</span>
+                                        <span class="font-medium text-green-400">${passTotalRate}%</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">优秀率</span>
+                                        <span class="font-medium text-primary">${excellentTotalRate}%</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                         <div class="glass-light rounded-xl p-4">
-                            <h4 class="font-medium mb-3">统计数据</h4>
-                            <div class="space-y-3">
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">平均分</span>
-                                    <span class="font-medium">82.5</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">中位数</span>
-                                    <span class="font-medium">84</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">标准差</span>
-                                    <span class="font-medium">12.3</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">及格率</span>
-                                    <span class="font-medium text-green-400">91.7%</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">优秀率</span>
-                                    <span class="font-medium text-primary">20%</span>
-                                </div>
+                            <h4 class="font-medium mb-3">分析总结</h4>
+                            <div class="text-sm text-gray-300 space-y-2">
+                                <p>• 本次考试共有 <span class="text-primary font-medium">${scores.length}</span> 名学生参加</p>
+                                <p>• 平均分为 <span class="text-secondary font-medium">${avgScore}</span> 分，整体表现${avgScore >= 80 ? '优秀' : avgScore >= 70 ? '良好' : avgScore >= 60 ? '一般' : '需改进'}</p>
+                                <p>• 及格率为 <span class="text-green-400 font-medium">${passTotalRate}%</span>，${passTotalRate >= 90 ? '绝大多数学生通过考试' : passTotalRate >= 70 ? '大部分学生通过考试' : '需要关注未通过的学生'}</p>
+                                <p>• 优秀率为 <span class="text-primary font-medium">${excellentTotalRate}%</span>，${excellentTotalRate >= 20 ? '优秀学生较多' : '仍有提升空间'}</p>
+                                <p>• 分数标准差为 <span class="text-accent font-medium">${stdDev}</span>，${stdDev < 10 ? '学生成绩较为集中' : stdDev < 15 ? '学生成绩分布适中' : '学生成绩差异较大'}</p>
                             </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+                
+                document.getElementById('modalContent').innerHTML = modalContent;
+                document.getElementById('genericModal').classList.remove('hidden');
+            } catch (error) {
+                console.error('获取成绩分析数据失败:', error);
+                showNotification('获取成绩分析数据失败', 'error');
+            }
+        }
+        
+        async function viewScoreDetail(id) {
+            try {
+                // 这里应该调用后端API获取成绩详情，暂时模拟
+                const result = await ApiService.score.getPage({ pageNum: 1, pageSize: 100 });
+                
+                if (result.code === 200) {
+                    const scores = result.data.records || [];
+                    const score = scores.find(s => s.id === id);
+                    
+                    if (!score) {
+                        showNotification('成绩记录不存在', 'error');
+                        return;
+                    }
+                    
+                    const modalContent = `
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-xl font-bold">成绩详情</h3>
+                            <button onclick="closeGenericModal()" class="text-gray-400 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="glass-light rounded-xl p-4">
+                                <h4 class="font-medium mb-3">基本信息</h4>
+                                <div class="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <span class="text-gray-400">学生姓名：</span>
+                                        <span class="font-medium">${score.studentName || '-'}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-400">学号：</span>
+                                        <span class="font-medium">${score.studentNo || '-'}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-400">考试名称：</span>
+                                        <span class="font-medium">${score.examName || '-'}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-400">提交时间：</span>
+                                        <span class="font-medium">${score.submitTime ? score.submitTime.replace('T', ' ').substring(0, 19) : '-'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="glass-light rounded-xl p-4">
+                                <h4 class="font-medium mb-3">成绩信息</h4>
+                                <div class="grid grid-cols-3 gap-4">
+                                    <div class="text-center">
+                                        <p class="text-gray-400 text-sm mb-1">客观题得分</p>
+                                        <p class="text-2xl font-bold text-secondary">${parseFloat(score.objectiveScore || 0).toFixed(1)}</p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-gray-400 text-sm mb-1">主观题得分</p>
+                                        <p class="text-2xl font-bold text-accent">${parseFloat(score.subjectiveScore || 0).toFixed(1)}</p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-gray-400 text-sm mb-1">总分</p>
+                                        <p class="text-3xl font-bold ${(parseFloat(score.totalScore) || 0) >= 60 ? 'text-green-400' : 'text-red-400'}">${parseFloat(score.totalScore || 0).toFixed(1)}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="glass-light rounded-xl p-4">
+                                <h4 class="font-medium mb-3">其他信息</h4>
+                                <div class="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <span class="text-gray-400">状态：</span>
+                                        <span class="tag ${getStatusColor(score.status)}">${getStatusText(score.status)}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-400">排名：</span>
+                                        <span class="font-medium">${score.rank || '-'}</span>
+                                    </div>
+                                    ${score.graderName ? `
+                                    <div>
+                                        <span class="text-gray-400">阅卷人：</span>
+                                        <span class="font-medium">${score.graderName}</span>
+                                    </div>
+                                    ` : ''}
+                                    ${score.gradeTime ? `
+                                    <div>
+                                        <span class="text-gray-400">阅卷时间：</span>
+                                        <span class="font-medium">${score.gradeTime.replace('T', ' ').substring(0, 19)}</span>
+                                    </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            
+                            ${score.remark ? `
+                            <div class="glass-light rounded-xl p-4">
+                                <h4 class="font-medium mb-2">备注</h4>
+                                <p class="text-sm text-gray-300">${score.remark}</p>
+                            </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    
+                    document.getElementById('modalContent').innerHTML = modalContent;
+                    document.getElementById('genericModal').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('获取成绩详情失败:', error);
+                showNotification('获取成绩详情失败', 'error');
+            }
+        }
+        
+        function exportStudentScore(id, studentName, examName) {
+            // 创建CSV内容
+            let csvContent = '\uFEFF'; // BOM for Excel
+            csvContent += '学生姓名,考试名称,客观题得分,主观题得分,总分\n';
+            csvContent += `${studentName},${examName},待查询,待查询,待查询\n`;
             
-            document.getElementById('modalContent').innerHTML = modalContent;
-            document.getElementById('genericModal').classList.remove('hidden');
-        }
-        
-        function viewScoreDetail(id) {
-            showNotification('查看成绩详情，ID: ' + id);
-        }
-        
-        function exportStudentScore(id) {
-            showNotification('导出学生成绩，ID: ' + id);
+            // 下载文件
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${studentName}_${examName}_成绩.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showNotification('学生成绩导出成功！');
         }
         
         // 我的成绩（学生视角）
@@ -3174,7 +4134,7 @@
                         <div class="glass-card rounded-2xl p-6">
                             <h3 class="text-lg font-bold mb-4">热门科目</h3>
                             <div class="space-y-3">
-                                ${mockData.subjects.slice(0, 5).map((subject, i) => `
+                                ${(mockData.subjects || []).slice(0, 5).map((subject, i) => `
                                     <div class="flex items-center justify-between">
                                         <div class="flex items-center gap-3">
                                             <span class="w-6 h-6 rounded-lg ${i < 3 ? 'bg-primary/20 text-primary' : 'bg-white/10 text-gray-400'} flex items-center justify-center text-sm">${i + 1}</span>
@@ -3190,17 +4150,10 @@
                         <div class="glass-card rounded-2xl p-6">
                             <h3 class="text-lg font-bold mb-4">活跃教师</h3>
                             <div class="space-y-3">
-                                ${mockData.users.filter(u => u.role === 'teacher').map(teacher => `
-                                    <div class="flex items-center justify-between">
-                                        <div class="flex items-center gap-3">
-                                            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                                                <i class="fas fa-user text-white text-sm"></i>
-                                            </div>
-                                            <span>${teacher.name}</span>
-                                        </div>
-                                        <span class="text-primary">${Math.floor(Math.random() * 50 + 20)}题</span>
-                                    </div>
-                                `).join('')}
+                                <div class="text-center text-gray-400 py-4">
+                                    <i class="fas fa-chalkboard-teacher text-4xl mb-2"></i>
+                                    <p>暂无教师数据</p>
+                                </div>
                             </div>
                         </div>
                         
@@ -3209,20 +4162,20 @@
                             <h3 class="text-lg font-bold mb-4">系统概览</h3>
                             <div class="space-y-4">
                                 <div class="flex items-center justify-between">
-                                    <span class="text-gray-400">总用户数</span>
-                                    <span class="font-medium">${mockData.users.length}</span>
+                                    <span class="text-gray-400">总科目数</span>
+                                    <span class="font-medium">${(mockData.subjects || []).length}</span>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <span class="text-gray-400">总试题数</span>
-                                    <span class="font-medium">${mockData.questions.length}</span>
+                                    <span class="text-gray-400">章节总数</span>
+                                    <span class="font-medium">${Object.values(mockData.chapters || {}).flat().length}</span>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <span class="text-gray-400">总试卷数</span>
-                                    <span class="font-medium">${mockData.papers.length}</span>
+                                    <span class="text-gray-400">题库状态</span>
+                                    <span class="font-medium text-green-400">正常</span>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <span class="text-gray-400">总考试数</span>
-                                    <span class="font-medium">${mockData.exams.length}</span>
+                                    <span class="text-gray-400">系统版本</span>
+                                    <span class="font-medium">v1.0.0</span>
                                 </div>
                             </div>
                         </div>

@@ -10,11 +10,15 @@ import org.college.examonline.mapper.ExamMapper;
 import org.college.examonline.service.ExamService;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class ExamServiceImpl extends ServiceImpl<ExamMapper, Exam> implements ExamService {
+    
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     
     @Override
     public Page<Exam> getExamPage(Integer pageNum, Integer pageSize, String status) {
@@ -37,6 +41,29 @@ public class ExamServiceImpl extends ServiceImpl<ExamMapper, Exam> implements Ex
     
     @Override
     public Result addExam(Exam exam) {
+        // 设置默认值
+        if (exam.getStatus() == null) {
+            exam.setStatus("upcoming");
+        }
+        if (exam.getParticipantCount() == null) {
+            exam.setParticipantCount(0);
+        }
+        if (exam.getSubmittedCount() == null) {
+            exam.setSubmittedCount(0);
+        }
+        if (exam.getAllowReview() == null) {
+            exam.setAllowReview(1);
+        }
+        if (exam.getRandomOrder() == null) {
+            exam.setRandomOrder(0);
+        }
+        if (exam.getAntiCheat() == null) {
+            exam.setAntiCheat(0);
+        }
+        if (exam.getMaxSwitchTimes() == null) {
+            exam.setMaxSwitchTimes(3);
+        }
+        
         return this.save(exam) ? Result.success() : Result.error("添加失败");
     }
     
