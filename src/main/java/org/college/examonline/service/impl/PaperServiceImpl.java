@@ -113,67 +113,87 @@ public class PaperServiceImpl extends ServiceImpl<PaperMapper, Paper> implements
             // 3. 根据配置从题库中随机抽题
             List<Question> selectedQuestions = new ArrayList<>();
             
-            // 按题型和难度抽题
+            // 题型映射
             Map<String, Integer> typeMap = new HashMap<>();
             typeMap.put("single", singleCount);
             typeMap.put("multiple", multipleCount);
             typeMap.put("judge", judgeCount);
             typeMap.put("essay", essayCount);
             
-            // 计算总题目数
-            int totalQuestionCount = (easyCount != null ? easyCount : 0) + 
-                                    (mediumCount != null ? mediumCount : 0) + 
-                                    (hardCount != null ? hardCount : 0);
+            // 难度映射
+            Map<String, Integer> difficultyMap = new HashMap<>();
+            if (easyCount != null && easyCount > 0) {
+                difficultyMap.put("easy", easyCount);
+            }
+            if (mediumCount != null && mediumCount > 0) {
+                difficultyMap.put("medium", mediumCount);
+            }
+            if (hardCount != null && hardCount > 0) {
+                difficultyMap.put("hard", hardCount);
+            }
             
-            // 遍历每种题型进行抽题
+            // 4. 计算总题目数（用于验证）
+            int totalByType = (singleCount != null ? singleCount : 0) + 
+                             (multipleCount != null ? multipleCount : 0) + 
+                             (judgeCount != null ? judgeCount : 0) + 
+                             (essayCount != null ? essayCount : 0);
+            
+            int totalByDifficulty = (easyCount != null ? easyCount : 0) + 
+                                   (mediumCount != null ? mediumCount : 0) + 
+                                   (hardCount != null ? hardCount : 0);
+            
+            // 如果两种方式的总数不一致，给出警告但不阻止
+            if (totalByType != totalByDifficulty && totalByDifficulty > 0) {
+                System.out.println("警告: 按题型统计的题目数(" + totalByType + ")与按难度统计的题目数(" + totalByDifficulty + ")不一致");
+            }
+            
+            // 5. 按题型和难度组合抽题
+            // 策略：将每种题型的数量按难度比例分配
             for (Map.Entry<String, Integer> typeEntry : typeMap.entrySet()) {
                 String type = typeEntry.getKey();
                 int typeTargetCount = typeEntry.getValue();
                 
                 if (typeTargetCount <= 0) continue;
                 
-                // 将该题型的数量按难度平均分配
-                int difficultyCount = 0;
-                if (easyCount != null && easyCount > 0) difficultyCount++;
-                if (mediumCount != null && mediumCount > 0) difficultyCount++;
-                if (hardCount != null && hardCount > 0) difficultyCount++;
-                
-                if (difficultyCount == 0) {
-                    // 如果没有设置难度分布，全部按中等难度抽取
+                // 如果没有设置任何难度，默认全部按中等难度抽取
+                if (difficultyMap.isEmpty()) {
                     selectedQuestions.addAll(selectQuestionsByCriteria(subject, "medium", type, typeTargetCount));
                 } else {
-                    // 按难度平均分配
-                    int perDifficultyCount = typeTargetCount / difficultyCount;
-                    int remaining = typeTargetCount % difficultyCount;
+                    // 按难度比例分配该题型的数量
+                    int allocated = 0;
+                    List<Map.Entry<String, Integer>> difficultyList = new ArrayList<>(difficultyMap.entrySet());
                     
-                    // 简单难度
-                    if (easyCount != null && easyCount > 0) {
-                        int count = perDifficultyCount + (remaining > 0 ? 1 : 0);
-                        selectedQuestions.addAll(selectQuestionsByCriteria(subject, "easy", type, count));
-                        if (remaining > 0) remaining--;
-                    }
-                    
-                    // 中等难度
-                    if (mediumCount != null && mediumCount > 0) {
-                        int count = perDifficultyCount + (remaining > 0 ? 1 : 0);
-                        selectedQuestions.addAll(selectQuestionsByCriteria(subject, "medium", type, count));
-                        if (remaining > 0) remaining--;
-                    }
-                    
-                    // 困难难度
-                    if (hardCount != null && hardCount > 0) {
-                        int count = perDifficultyCount + (remaining > 0 ? 1 : 0);
-                        selectedQuestions.addAll(selectQuestionsByCriteria(subject, "hard", type, count));
+                    for (int i = 0; i < difficultyList.size(); i++) {
+                        Map.Entry<String, Integer> diffEntry = difficultyList.get(i);
+                        String difficulty = diffEntry.getKey();
+                        int diffTotalCount = diffEntry.getValue();
+                        
+                        int count;
+                        if (i == difficultyList.size() - 1) {
+                            // 最后一个难度，分配剩余的所有数量
+                            count = typeTargetCount - allocated;
+                        } else {
+                            // 按比例分配：该难度占总难度的比例 * 该题型总数
+                            double ratio = (double) diffTotalCount / totalByDifficulty;
+                            count = (int) Math.round(typeTargetCount * ratio);
+                            // 确保不会超过剩余数量
+                            count = Math.min(count, typeTargetCount - allocated);
+                        }
+                        
+                        if (count > 0) {
+                            selectedQuestions.addAll(selectQuestionsByCriteria(subject, difficulty, type, count));
+                            allocated += count;
+                        }
                     }
                 }
             }
             
-            // 4. 计算总分
+            // 6. 计算总分
             BigDecimal totalScore = selectedQuestions.stream()
                     .map(Question::getScore)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             
-            // 5. 创建试卷
+            // 7. 创建试卷
             Paper paper = new Paper();
             paper.setName(name);
             paper.setSubject(subject);
@@ -197,14 +217,14 @@ public class PaperServiceImpl extends ServiceImpl<PaperMapper, Paper> implements
             paperConfig.put("essayCount", essayCount);
             paper.setConfig(objectMapper.writeValueAsString(paperConfig));
             
-            // 6. 保存试卷
+            // 8. 保存试卷
             boolean saved = this.save(paper);
             
             if (!saved) {
                 return Result.error("试卷创建失败");
             }
             
-            // 7. 将题目关联到试卷（插入paper_question表）
+            // 9. 将题目关联到试卷（插入paper_question表）
             int sortOrder = 1;
             for (Question question : selectedQuestions) {
                 baseMapper.insertPaperQuestion(
