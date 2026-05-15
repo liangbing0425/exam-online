@@ -50,4 +50,9 @@ public class PaperController {
     public Result autoGeneratePaper(@RequestBody Map<String, Object> config) {
         return paperService.autoGeneratePaper(config);
     }
+    
+    @GetMapping("/{id}/questions")
+    public Result getPaperQuestions(@PathVariable Long id) {
+        return paperService.getPaperQuestions(id);
+    }
 }

@@ -517,7 +517,8 @@
                 add: (data) => apiPost('/paper', data),
                 update: (data) => apiPut('/paper', data),
                 delete: (id) => apiDelete(`/paper/${id}`),
-                autoGenerate: (config) => apiPost('/paper/auto-generate', config)
+                autoGenerate: (config) => apiPost('/paper/auto-generate', config),
+                getQuestions: (id) => apiGet(`/paper/${id}/questions`)
             },
             
             // 考试相关API
@@ -2541,6 +2542,51 @@
                         return;
                     }
                     
+                    // 获取试卷的题目列表
+                    let questionsHtml = '';
+                    try {
+                        const questionsResult = await ApiService.paper.getQuestions(id);
+                        if (questionsResult.code === 200 && questionsResult.data && questionsResult.data.length > 0) {
+                            const questions = questionsResult.data;
+                            questionsHtml = `
+                                <div class="mt-6">
+                                    <h4 class="text-lg font-bold mb-4">试卷题目（共${questions.length}道）</h4>
+                                    <div class="space-y-3 max-h-96 overflow-y-auto">
+                                        ${questions.map((q, index) => `
+                                            <div class="glass-light rounded-xl p-4">
+                                                <div class="flex items-center gap-3 mb-2">
+                                                    <span class="tag bg-primary/20 text-primary">${index + 1}</span>
+                                                    <span class="tag ${getDifficultyColor(q.difficulty)}">${getDifficultyText(q.difficulty)}</span>
+                                                    <span class="text-sm text-gray-400">${q.question_score || q.original_score}分</span>
+                                                    <span class="text-sm text-gray-400">${getQuestionTypeText(q.type)}</span>
+                                                </div>
+                                                <p class="text-sm">${q.content || q.question_content}</p>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            questionsHtml = `
+                                <div class="mt-6">
+                                    <div class="glass-light rounded-xl p-8 text-center">
+                                        <i class="fas fa-inbox text-4xl text-gray-500 mb-3"></i>
+                                        <p class="text-gray-400">该试卷暂无题目，请使用“自动组卷”功能生成题目</p>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    } catch (err) {
+                        console.error('获取题目列表失败:', err);
+                        questionsHtml = `
+                            <div class="mt-6">
+                                <div class="glass-light rounded-xl p-4 text-center text-red-400">
+                                    <i class="fas fa-exclamation-triangle mr-2"></i>加载题目列表失败
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
                     const modalContent = `
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-xl font-bold">编辑试卷</h3>
@@ -2599,6 +2645,7 @@
                                 <button type="submit" class="btn-primary px-6 py-2 rounded-xl">更新</button>
                             </div>
                         </form>
+                        ${questionsHtml}
                     `;
                     
                     document.getElementById('modalContent').innerHTML = modalContent;

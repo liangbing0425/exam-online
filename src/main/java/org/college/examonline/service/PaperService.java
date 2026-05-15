@@ -19,4 +19,6 @@ public interface PaperService extends IService<Paper> {
     Result deletePaper(Long id);
     
     Result autoGeneratePaper(Map<String, Object> config);
+    
+    Result getPaperQuestions(Long paperId);
 }
