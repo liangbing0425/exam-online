@@ -57,4 +57,13 @@ public class ExamController {
                             @RequestBody List<Map<String, Object>> answers) {
         return examService.submitExam(examId, studentId, answers);
     }
+    
+    /**
+     * 手动触发更新所有考试的状态
+     */
+    @PostMapping("/update-status")
+    public Result updateExamStatus() {
+        examService.updateExamStatus();
+        return Result.success("考试状态更新成功");
+    }
 }

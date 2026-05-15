@@ -22,4 +22,9 @@ public interface ExamService extends IService<Exam> {
     Result enterExam(Long examId, Long studentId);
     
     Result submitExam(Long examId, Long studentId, List<Map<String, Object>> answers);
+    
+    /**
+     * 更新所有考试的状态（根据当前时间与考试开始/结束时间比较）
+     */
+    void updateExamStatus();
 }

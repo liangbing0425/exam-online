@@ -527,7 +527,7 @@
                 add: (data) => apiPost('/exam', data),
                 update: (data) => apiPut('/exam', data),
                 delete: (id) => apiDelete(`/exam/${id}`),
-                enter: (examId, studentId) => apiPost(`/exam/enter/${examId}`, { studentId }),
+                enter: (examId, studentId) => apiPost(`/exam/enter/${examId}?studentId=${studentId}`, {}),
                 submit: (examId, studentId, answers) => apiPost(`/exam/submit/${examId}?studentId=${studentId}`, answers)
             },
             
@@ -613,6 +613,48 @@
         
         function formatDateTime(dateStr) {
             return dateStr;
+        }
+        
+        /**
+         * 根据考试时间动态判断考试状态
+         * @param {Object} exam - 考试对象，包含startTime和endTime
+         * @returns {string} - 'ongoing'(进行中), 'upcoming'(未开始), 'ended'(已结束)
+         */
+        function getExamStatus(exam) {
+            if (!exam.startTime || !exam.endTime) {
+                return exam.status || 'upcoming';
+            }
+            
+            const now = new Date();
+            const startTime = new Date(exam.startTime.replace(' ', 'T'));
+            const endTime = new Date(exam.endTime.replace(' ', 'T'));
+            
+            if (now < startTime) {
+                return 'upcoming';
+            } else if (now >= startTime && now <= endTime) {
+                return 'ongoing';
+            } else {
+                return 'ended';
+            }
+        }
+        
+        /**
+         * 根据试卷数据动态判断试卷状态
+         * @param {Object} paper - 试卷对象，包含questionCount等信息
+         * @returns {string} - 'published'(已发布/可用), 'draft'(草稿/不可用)
+         */
+        function getPaperStatus(paper) {
+            // 如果已有明确的状态字段，优先使用
+            if (paper.status) {
+                return paper.status;
+            }
+            
+            // 根据题目数量判断：有题目则为已发布，否则为草稿
+            if (paper.questionCount && paper.questionCount > 0) {
+                return 'published';
+            } else {
+                return 'draft';
+            }
         }
         
         function getDifficultyColor(difficulty) {
@@ -920,7 +962,7 @@
                                             </div>
                                             <div class="flex items-center gap-3">
                                                 <span class="tag ${getStatusColor(exam.status)}">${getStatusText(exam.status)}</span>
-                                                ${exam.status === 'ongoing' && state.currentUser.role === 'student' ? `<button onclick="enterExam(${exam.id})" class="btn-primary px-4 py-2 rounded-lg text-sm">进入考试</button>` : ''}
+                                                ${exam.status === 'ongoing' ? `<button onclick="enterExam(${exam.id})" class="btn-primary px-4 py-2 rounded-lg text-sm">进入考试</button>` : ''}
                                             </div>
                                         </div>
                                     `).join('') : '<p class="text-gray-400 text-center py-8">暂无考试数据</p>'}
@@ -2730,10 +2772,12 @@
                 const result = await ApiService.paper.getPage({ pageNum: 1, pageSize: 100, status: 'published' });
                 
                 let papersHtml = '';
+                let papersData = [];
                 if (result.code === 200) {
                     const papers = result.data.records || [];
+                    papersData = papers;
                     papersHtml = papers.map(p => `
-                        <option value="${p.id}">${p.name} (${p.subject})</option>
+                        <option value="${p.id}" data-duration="${p.duration}">${p.name} (${p.subject})</option>
                     `).join('');
                 }
                 
@@ -2751,19 +2795,23 @@
                     <form onsubmit="createExam(event)" class="space-y-4">
                         <div>
                             <label class="block text-sm text-gray-300 mb-2">选择试卷</label>
-                            <select name="paperId" class="input-field w-full px-4 py-2 rounded-xl" required>
+                            <select name="paperId" id="paperSelect" class="input-field w-full px-4 py-2 rounded-xl" required>
                                 ${papersHtml}
                             </select>
                         </div>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm text-gray-300 mb-2">开始时间</label>
-                                <input type="datetime-local" name="startTime" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                <input type="datetime-local" name="startTime" id="examStartTime" class="input-field w-full px-4 py-2 rounded-xl" required onchange="calculateExamDuration()">
                             </div>
                             <div>
                                 <label class="block text-sm text-gray-300 mb-2">结束时间</label>
-                                <input type="datetime-local" name="endTime" class="input-field w-full px-4 py-2 rounded-xl" required>
+                                <input type="datetime-local" name="endTime" id="examEndTime" class="input-field w-full px-4 py-2 rounded-xl" required onchange="calculateExamDuration()">
                             </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-300 mb-2">考试时长（分钟）</label>
+                            <input type="number" name="duration" id="examDuration" class="input-field w-full px-4 py-2 rounded-xl bg-white/5 cursor-not-allowed" readonly placeholder="根据开始和结束时间自动计算">
                         </div>
                         <div>
                             <label class="block text-sm text-gray-300 mb-2">考试说明</label>
@@ -2798,6 +2846,38 @@
             } catch (error) {
                 console.error('加载试卷列表失败:', error);
                 showNotification('加载试卷列表失败', 'error');
+            }
+        }
+        
+        /**
+         * 根据开始时间和结束时间自动计算考试时长
+         */
+        function calculateExamDuration() {
+            const startTimeInput = document.getElementById('examStartTime');
+            const endTimeInput = document.getElementById('examEndTime');
+            const durationInput = document.getElementById('examDuration');
+            
+            if (startTimeInput && endTimeInput && durationInput) {
+                const startTimeValue = startTimeInput.value;
+                const endTimeValue = endTimeInput.value;
+                
+                if (startTimeValue && endTimeValue) {
+                    const startTime = new Date(startTimeValue);
+                    const endTime = new Date(endTimeValue);
+                    
+                    // 计算时间差（分钟）
+                    const diffMs = endTime.getTime() - startTime.getTime();
+                    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+                    
+                    if (diffMinutes > 0) {
+                        durationInput.value = diffMinutes;
+                    } else {
+                        durationInput.value = '';
+                        showNotification('结束时间必须晚于开始时间', 'error');
+                    }
+                } else {
+                    durationInput.value = '';
+                }
             }
         }
         
@@ -2838,7 +2918,7 @@
                 subject: subject,
                 startTime: startTime,
                 endTime: endTime,
-                duration: 60, // 默认60分钟，实际应该从试卷中获取
+                duration: Math.floor((new Date(endTime) - new Date(startTime)) / (1000 * 60)),
                 status: 'upcoming',
                 participantCount: 0,
                 submittedCount: 0,
@@ -4621,42 +4701,77 @@
         
         // ==================== 考试监控 ====================
         function startExamMonitor() {
-            // 显示监控浮窗
-            document.getElementById('examMonitor').classList.remove('hidden');
-            
-            // 开启摄像头监控
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    state.cameraStream = stream;
-                    const video = document.getElementById('monitorVideo');
-                    video.srcObject = stream;
-                })
-                .catch(err => console.log('摄像头监控启动失败'));
-            
-            // 切屏检测
-            document.addEventListener('visibilitychange', handleVisibilityChange);
-            window.addEventListener('blur', handleWindowBlur);
+            try {
+                // 显示监控浮窗
+                const monitorEl = document.getElementById('examMonitor');
+                if (monitorEl) {
+                    monitorEl.classList.remove('hidden');
+                }
+                
+                // 开启摄像头监控（失败不影响考试）
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(stream => {
+                        state.cameraStream = stream;
+                        const video = document.getElementById('monitorVideo');
+                        if (video) {
+                            video.srcObject = stream;
+                        }
+                    })
+                    .catch(err => {
+                        console.warn('摄像头监控启动失败:', err.message);
+                        // 摄像头失败不阻止考试，只显示提示
+                        showNotification('摄像头启动失败，考试将继续进行', 'error');
+                    });
+                
+                // 切屏检测
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+                window.addEventListener('blur', handleWindowBlur);
+            } catch (error) {
+                console.error('启动考试监控失败:', error);
+                // 即使监控启动失败，也允许继续考试
+            }
         }
         
         function stopExamMonitor() {
-            document.getElementById('examMonitor').classList.add('hidden');
-            stopCamera();
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('blur', handleWindowBlur);
+            try {
+                const monitorEl = document.getElementById('examMonitor');
+                if (monitorEl) {
+                    monitorEl.classList.add('hidden');
+                }
+                stopCamera();
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+                window.removeEventListener('blur', handleWindowBlur);
+            } catch (error) {
+                console.error('停止考试监控失败:', error);
+            }
         }
         
         function handleVisibilityChange() {
-            if (document.hidden && state.examMode) {
-                state.switchCount++;
-                document.getElementById('switchCount').textContent = state.switchCount;
-                showNotification('警告：请勿离开考试页面！切屏次数：' + state.switchCount, 'error');
+            try {
+                if (document.hidden && state.examMode) {
+                    state.switchCount++;
+                    const switchCountEl = document.getElementById('switchCount');
+                    if (switchCountEl) {
+                        switchCountEl.textContent = state.switchCount;
+                    }
+                    showNotification('警告：请勿离开考试页面！切屏次数：' + state.switchCount, 'error');
+                }
+            } catch (error) {
+                console.error('处理页面可见性变化失败:', error);
             }
         }
         
         function handleWindowBlur() {
-            if (state.examMode) {
-                state.switchCount++;
-                document.getElementById('switchCount').textContent = state.switchCount;
+            try {
+                if (state.examMode) {
+                    state.switchCount++;
+                    const switchCountEl = document.getElementById('switchCount');
+                    if (switchCountEl) {
+                        switchCountEl.textContent = state.switchCount;
+                    }
+                }
+            } catch (error) {
+                console.error('处理窗口失焦失败:', error);
             }
         }
         
