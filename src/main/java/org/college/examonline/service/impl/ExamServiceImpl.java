@@ -5,17 +5,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.college.examonline.common.Result;
-import org.college.examonline.entity.Exam;
-import org.college.examonline.entity.Paper;
-import org.college.examonline.entity.Question;
+import org.college.examonline.entity.*;
 import org.college.examonline.mapper.ExamMapper;
-import org.college.examonline.service.ExamService;
-import org.college.examonline.service.PaperService;
-import org.college.examonline.service.QuestionService;
+import org.college.examonline.service.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -29,6 +26,12 @@ public class ExamServiceImpl extends ServiceImpl<ExamMapper, Exam> implements Ex
     
     @Autowired
     private QuestionService questionService;
+    
+    @Autowired
+    private ScoreService scoreService;
+    
+    @Autowired
+    private UserService userService;
     
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     
@@ -244,9 +247,131 @@ public class ExamServiceImpl extends ServiceImpl<ExamMapper, Exam> implements Ex
     }
     
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Result submitExam(Long examId, Long studentId, List<Map<String, Object>> answers) {
-        // TODO: 实现提交考试逻辑
-        return Result.success();
+        try {
+            // 1. 获取考试信息
+            Exam exam = this.getById(examId);
+            if (exam == null) {
+                return Result.error("考试不存在");
+            }
+            
+            // 2. 获取试卷信息
+            Paper paper = paperService.getById(exam.getPaperId());
+            if (paper == null) {
+                return Result.error("试卷不存在");
+            }
+            
+            // 3. 获取学生信息
+            User student = userService.getById(studentId);
+            if (student == null) {
+                return Result.error("学生不存在");
+            }
+            
+            // 4. 获取试卷中的所有题目（通过paper_question表）
+            List<Map<String, Object>> paperQuestions = baseMapper.getPaperQuestions(exam.getPaperId());
+            if (paperQuestions == null || paperQuestions.isEmpty()) {
+                return Result.error("该试卷暂无题目");
+            }
+            
+            // 5. 计算分数
+            BigDecimal objectiveScore = BigDecimal.ZERO; // 客观题分数
+            BigDecimal subjectiveScore = BigDecimal.ZERO; // 主观题分数（暂时为0，需要人工阅卷）
+            
+            // 构建答案映射：questionIndex -> answer
+            Map<Integer, String> answerMap = new HashMap<>();
+            if (answers != null) {
+                for (Map<String, Object> ans : answers) {
+                    Integer questionIndex = (Integer) ans.get("questionIndex");
+                    String answer = (String) ans.get("answer");
+                    if (questionIndex != null && answer != null) {
+                        answerMap.put(questionIndex, answer);
+                    }
+                }
+            }
+            
+            // 6. 逐题判分
+            int questionIndex = 0;
+            for (Map<String, Object> pq : paperQuestions) {
+                Long questionId = ((Number) pq.get("question_id")).longValue();
+                Question question = questionService.getById(questionId);
+                
+                if (question != null) {
+                    BigDecimal questionScore = new BigDecimal(pq.get("question_score").toString());
+                    String studentAnswer = answerMap.get(questionIndex);
+                    
+                    // 只处理客观题（单选、多选、判断）
+                    if ("single".equals(question.getType()) || "multiple".equals(question.getType()) || "judge".equals(question.getType())) {
+                        // 对比答案
+                        if (studentAnswer != null && question.getAnswer() != null) {
+                            // 标准化答案（去除空格、转大写）
+                            String normalizedStudentAnswer = studentAnswer.trim().toUpperCase();
+                            String normalizedCorrectAnswer = question.getAnswer().trim().toUpperCase();
+                            
+                            // 多选题需要排序后比较
+                            if ("multiple".equals(question.getType())) {
+                                // 将答案转换为字符数组并排序
+                                char[] studentChars = normalizedStudentAnswer.toCharArray();
+                                char[] correctChars = normalizedCorrectAnswer.toCharArray();
+                                Arrays.sort(studentChars);
+                                Arrays.sort(correctChars);
+                                String sortedStudentAnswer = new String(studentChars);
+                                String sortedCorrectAnswer = new String(correctChars);
+                                
+                                if (sortedStudentAnswer.equals(sortedCorrectAnswer)) {
+                                    objectiveScore = objectiveScore.add(questionScore);
+                                }
+                            } else {
+                                // 单选题和判断题直接比较
+                                if (normalizedStudentAnswer.equals(normalizedCorrectAnswer)) {
+                                    objectiveScore = objectiveScore.add(questionScore);
+                                }
+                            }
+                        }
+                    }
+                    // 主观题（填空、简答）暂不计分，需要人工阅卷
+                    
+                    questionIndex++;
+                }
+            }
+            
+            // 7. 计算总分
+            BigDecimal totalScore = objectiveScore.add(subjectiveScore);
+            
+            // 8. 创建成绩记录
+            Score score = new Score();
+            score.setExamId(examId);
+            score.setExamName(exam.getPaperName());
+            score.setStudentId(studentId);
+            score.setStudentNo(student.getUsername()); // 使用username作为学号
+            score.setStudentName(student.getName());
+            score.setTotalScore(totalScore);
+            score.setObjectiveScore(objectiveScore);
+            score.setSubjectiveScore(subjectiveScore);
+            score.setStatus("graded"); // 已阅卷（客观题已自动评分）
+            score.setSubmitTime(LocalDateTime.now());
+            score.setGradeTime(LocalDateTime.now());
+            score.setGraderId(0L); // 系统自动阅卷
+            score.setGraderName("系统");
+            
+            // 9. 保存成绩
+            scoreService.save(score);
+            
+            // 10. 构建返回数据
+            Map<String, Object> resultData = new HashMap<>();
+            resultData.put("scoreId", score.getId());
+            resultData.put("totalScore", totalScore);
+            resultData.put("objectiveScore", objectiveScore);
+            resultData.put("subjectiveScore", subjectiveScore);
+            resultData.put("examName", exam.getPaperName());
+            resultData.put("submitTime", score.getSubmitTime());
+            
+            return Result.success(resultData);
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return Result.error("提交考试失败：" + e.getMessage());
+        }
     }
     
     @Override
